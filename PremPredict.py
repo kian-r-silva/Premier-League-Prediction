@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import kagglehub
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -58,8 +59,9 @@ def seasonAwayStats(group):
     return stats
 
 def historicalData(df):
-    """Prepare historical data for model training"""
     # Calculate home stats
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.fillna(0)
     homeStats = df.groupby(['Season', 'HomeTeam'], group_keys=False).apply(seasonHomeStats)
     homeStats = homeStats.reset_index()
     homeStats.columns = ['Season', 'Team'] + list(homeStats.columns[2:])
@@ -99,21 +101,62 @@ def historicalData(df):
             })
             seasonStats = pd.concat([seasonStats, combined.to_frame().T], ignore_index=True)
 
+    matches = seasonStats['matches_played'].replace(0, 1)  
+    shots = seasonStats['shots'].replace(0, 1)  
     # Calculate additional features
-    seasonStats['win_ratio'] = seasonStats['wins'] / seasonStats['matches_played']
-    seasonStats['goals_per_game'] = seasonStats['goals_scored'] / seasonStats['matches_played']
-    seasonStats['goals_conceded_per_game'] = seasonStats['goals_conceded'] / seasonStats['matches_played']
-    seasonStats['shots_conversion_rate'] = seasonStats['goals_scored'] / seasonStats['shots']
-    seasonStats['shots_on_target_ratio'] = seasonStats['shots_on_target'] / seasonStats['shots']
-    
+    seasonStats['win_ratio'] = seasonStats['wins'] / matches
+    seasonStats['goals_per_game'] = seasonStats['goals_scored'] / matches
+    seasonStats['goals_conceded_per_game'] = seasonStats['goals_conceded'] / matches
+    seasonStats['shots_conversion_rate'] = seasonStats['goals_scored'] / shots
+    seasonStats['shots_on_target_ratio'] = seasonStats['shots_on_target'] / shots
+    seasonStats = seasonStats.replace([np.inf, -np.inf], 0)
+    seasonStats = seasonStats.fillna(0)
+
     # Create target variable (1 for champion, 0 for others)
     seasonStats['is_champion'] = seasonStats.groupby('Season')['points'].transform(max) == seasonStats['points']
     
     return seasonStats
 
+def trainModel(featuresDf):
+    featureCol = [
+        'points', 'goals_scored', 'goals_conceded', 'shots', 'shots_on_target',
+        'corners', 'fouls', 'yellow_cards', 'red_cards', 'goals_difference',
+        'clean_sheets', 'wins', 'draws', 'losses', 'win_ratio',
+        'goals_per_game', 'goals_conceded_per_game', 'shots_conversion_rate',
+        'shots_on_target_ratio', 'avg_odds', 'market_value'
+    ]
+    X = featuresDf[featureCol]
+    y = featuresDf['is_champion']
+
+    # Split data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    # Train model
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+
+    # Evaluate model
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"Accuracy: {accuracy}")
+    print("\nClassification Report: \n", classification_report(y_test, y_pred))
+    featureImportance = pd.DataFrame({
+        'feature': featureCol,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    print("\nFeature Importance: \n", featureImportance)
+
+    return model, scaler, featureCol
+
 df = pd.read_csv(f"{path}/PremierLeague.csv")
 seasonStats = historicalData(df)
 print(seasonStats)
+
+model, scaler, featureCol = trainModel(seasonStats)
+
 '''
 data set keys: 
     ['MatchID', 'Season', 'MatchWeek', 'Date', 'Time', 'HomeTeam',
