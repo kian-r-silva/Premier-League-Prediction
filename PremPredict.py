@@ -4,7 +4,6 @@ import kagglehub
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-import requests
 from sklearn.metrics import accuracy_score, classification_report
 from datetime import datetime
 
@@ -13,7 +12,6 @@ path = kagglehub.dataset_download("ajaxianazarenka/premier-league")
 
 
 def seasonHomeStats(group):
-    """Calculate statistics for home games"""
     stats = pd.Series({
         'matches_played': len(group),
         'goals_scored': group['FullTimeHomeTeamGoals'].sum(),
@@ -36,7 +34,6 @@ def seasonHomeStats(group):
     return stats
 
 def seasonAwayStats(group):
-    """Calculate statistics for away games"""
     stats = pd.Series({
         'matches_played': len(group),
         'goals_scored': group['FullTimeAwayTeamGoals'].sum(),
@@ -59,19 +56,17 @@ def seasonAwayStats(group):
     return stats
 
 def historicalData(df):
-    # Calculate home stats
     df = df.replace([np.inf, -np.inf], np.nan)
     df = df.fillna(0)
-    homeStats = df.groupby(['Season', 'HomeTeam'], group_keys=False).apply(seasonHomeStats)
+    homeStats = df.groupby(['Season', 'HomeTeam'], group_keys=False).apply(seasonHomeStats, include_groups=False)
+    
     homeStats = homeStats.reset_index()
     homeStats.columns = ['Season', 'Team'] + list(homeStats.columns[2:])
 
-    # Calculate away stats
-    awayStats = df.groupby(['Season', 'AwayTeam'], group_keys=False).apply(seasonAwayStats)
+    awayStats = df.groupby(['Season', 'AwayTeam'], group_keys=False).apply(seasonAwayStats, include_groups=False)
     awayStats = awayStats.reset_index()
     awayStats.columns = ['Season', 'Team'] + list(awayStats.columns[2:])
 
-    # Combine home and away stats
     seasonStats = pd.DataFrame()
     for season in homeStats['Season'].unique():
         for team in homeStats[homeStats['Season'] == season]['Team'].unique():
@@ -103,7 +98,6 @@ def historicalData(df):
 
     matches = seasonStats['matches_played'].replace(0, 1)  
     shots = seasonStats['shots'].replace(0, 1)  
-    # Calculate additional features
     seasonStats['win_ratio'] = seasonStats['wins'] / matches
     seasonStats['goals_per_game'] = seasonStats['goals_scored'] / matches
     seasonStats['goals_conceded_per_game'] = seasonStats['goals_conceded'] / matches
@@ -112,9 +106,7 @@ def historicalData(df):
     seasonStats = seasonStats.replace([np.inf, -np.inf], 0)
     seasonStats = seasonStats.fillna(0)
 
-    # Create target variable (1 for champion, 0 for others)
-    seasonStats['is_champion'] = seasonStats.groupby('Season')['points'].transform(max) == seasonStats['points']
-    
+    seasonStats['is_champion'] = seasonStats.groupby('Season')['points'].transform('max') == seasonStats['points']    
     return seasonStats
 
 def trainModel(featuresDf):
@@ -128,17 +120,14 @@ def trainModel(featuresDf):
     X = featuresDf[featureCol]
     y = featuresDf['is_champion']
 
-    # Split data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    # Train model
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
 
-    # Evaluate model
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
     print(f"Accuracy: {accuracy}")
@@ -151,11 +140,71 @@ def trainModel(featuresDf):
 
     return model, scaler, featureCol
 
-df = pd.read_csv(f"{path}/PremierLeague.csv")
-seasonStats = historicalData(df)
-print(seasonStats)
+def create_matchup_data(team1, team2, seasonStats):
+    # Fetch stats for both teams
+    team1_stats = seasonStats['Team'] == team1
+    team2_stats = seasonStats['Team'] == team2
 
+    # Calculate matchup-specific features
+    matchup_features = pd.Series({
+        'goals_difference': team1_stats['goals_scored'] - team2_stats['goals_scored'],
+        'shots': team1_stats['shots'] - team2_stats['shots'],
+        'points': team1_stats['points'] - team2_stats['points'],
+        'home_advantage': 1
+    })
+
+    return matchup_features
+
+def prepare_match_dataset(seasonStats, results_df):
+    match_data = []
+    for _, match in results_df.iterrows():
+        team1 = match['HomeTeam']
+        team2 = match['AwayTeam']
+        result = 1 if match['FullTimeResult'] == 'H' else 0  # 1 for home win
+
+        features = create_matchup_data(team1, team2, seasonStats)
+        features['result'] = result
+        match_data.append(features)
+
+    return pd.DataFrame(match_data)
+def predict_match(team1, team2, model, seasonStats):
+    features = create_matchup_data(team1, team2, seasonStats)
+    prob = model.predict_proba([features])[0]
+    return {
+        'team1': team1,
+        'team2': team2,
+        'team1_win_prob': prob[1],
+        'team2_win_prob': prob[0],
+    }
+
+
+df = pd.read_csv(f"{path}/PremierLeague.csv")
+current_year = datetime.now().year
+
+current_season = f"{current_year-1}-{current_year}"
+last_ten_seasons = [
+    f"{current_year-2}-{current_year-1}",
+    f"{current_year-3}-{current_year-2}",
+    f"{current_year-4}-{current_year-3}",
+    f"{current_year-5}-{current_year-4}",
+    f"{current_year-6}-{current_year-5}",
+    f"{current_year-7}-{current_year-6}",
+    f"{current_year-8}-{current_year-7}",
+    f"{current_year-9}-{current_year-8}",
+    f"{current_year-10}-{current_year-9}",
+]
+
+histData = df[df['Season'].isin(last_ten_seasons + [current_season])]
+
+seasonStats = historicalData(histData)
 model, scaler, featureCol = trainModel(seasonStats)
+
+print(seasonStats['Team'].unique())
+team1 = input("Enter the name of the first team (Home Team): ")
+team2 = input("Enter the name of the second team (Away Team): ")
+
+match_outcome = predict_match(model, team1, team2, seasonStats)
+print(match_outcome)
 
 '''
 data set keys: 
