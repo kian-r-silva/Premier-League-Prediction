@@ -141,7 +141,6 @@ def trainModel(featuresDf):
     return model, scaler, featureCol
 
 def create_matchup_data(team1, team2, seasonStats):
-    # Get stats for both teams
     team1_stats = seasonStats[seasonStats['Team'] == team1].iloc[-1]
     team2_stats = seasonStats[seasonStats['Team'] == team2].iloc[-1]
 
@@ -150,9 +149,8 @@ def create_matchup_data(team1, team2, seasonStats):
     if team2_stats.empty:
         raise ValueError(f"Stats for team '{team2}' not found.")
 
-    # Create comparative features
     matchup_features = pd.Series({
-        'points': team1_stats['points'] - team2_stats['points'],  # Relative strength
+        'points': team1_stats['points'] - team2_stats['points'],  
         'goals_scored': team1_stats['goals_scored'] - team2_stats['goals_scored'],
         'goals_conceded': team1_stats['goals_conceded'] - team2_stats['goals_conceded'],
         'shots': team1_stats['shots'] - team2_stats['shots'],
@@ -171,7 +169,7 @@ def create_matchup_data(team1, team2, seasonStats):
         'goals_conceded_per_game': team1_stats['goals_conceded_per_game'] - team2_stats['goals_conceded_per_game'],
         'shots_conversion_rate': team1_stats['shots_conversion_rate'] - team2_stats['shots_conversion_rate'],
         'shots_on_target_ratio': team1_stats['shots_on_target_ratio'] - team2_stats['shots_on_target_ratio'],
-        'avg_odds': team1_stats['avg_odds'],  # Keep home team odds
+        'avg_odds': team1_stats['avg_odds'],  
         'market_value': team1_stats['market_value'] - team2_stats['market_value']
     })
 
@@ -183,10 +181,8 @@ def prepare_match_dataset(seasonStats, results_df):
         home_team = match['HomeTeam']
         away_team = match['AwayTeam']
         
-        # Get season for this match
         season = seasonStats[seasonStats['Team'] == home_team]['Season'].iloc[-1]
         
-        # Get team stats from that season
         home_stats = seasonStats[(seasonStats['Team'] == home_team) & (seasonStats['Season'] == season)]
         away_stats = seasonStats[(seasonStats['Team'] == away_team) & (seasonStats['Season'] == season)]
         
@@ -239,7 +235,6 @@ def predict_season_winner(model, scaler, feature_cols, seasonStats, current_seas
     X_scaled = scaler.transform(X)
     probabilities = model.predict_proba(X_scaled)
     
-    # Create predictions dataframe
     predictions = pd.DataFrame({
         'Team': current_teams['Team'],
         'Championship_Probability': [round(prob[1] * 100, 2) for prob in probabilities]
@@ -264,41 +259,21 @@ results_df = histData[[
     'FullTimeHomeTeamGoals',
     'FullTimeAwayTeamGoals'
 ]]
-
+recentWeek = histData['MatchWeek'].iloc[-1]
 seasonStats = historicalData(histData)
 
 model, scaler, feature_cols = trainModel(seasonStats)
 
 print("\n=== Premier League Predictor ===")
-print("1. Predict match outcome")
-print("2. Predict season winner")
-choice = input("Enter your choice (1 or 2): ").strip()
+print("Predict match outcome")
+try:
+    season_predictions = predict_season_winner(model, scaler, feature_cols, seasonStats, current_season)
+    print(f"\nSeason Winner Predictions: (As of matchweek {recentWeek})")
+    print("Top 5 Contenders:")
+    print(season_predictions.head().to_string(index=False))
+except ValueError as e:
+    print(f"Error: {e}")
 
-if choice == "1":
-    print("\nAvailable teams:", seasonStats['Team'].unique())
-    team1 = input("Enter the name of the first team (Home Team): ").strip()
-    team2 = input("Enter the name of the second team (Away Team): ").strip()
-    
-    try:
-        match_outcome = predict_match(team1, team2, model, scaler, feature_cols, seasonStats)
-        print("\nMatch Prediction:")
-        print(f"{match_outcome['home_team']} vs {match_outcome['away_team']}")
-        print(f"Home Win Probability: {match_outcome['home_win_probability']}%")
-        print(f"Away Win Probability: {match_outcome['away_win_probability']}%")
-    except ValueError as e:
-        print(f"Error: {e}")
-
-elif choice == "2":
-    try:
-        season_predictions = predict_season_winner(model, scaler, feature_cols, seasonStats, current_season)
-        print("\nSeason Winner Predictions:")
-        print("Top 5 Contenders:")
-        print(season_predictions.head().to_string(index=False))
-    except ValueError as e:
-        print(f"Error: {e}")
-
-else:
-    print("Invalid choice. Please run again and select 1 or 2.")
 
 '''
 data set keys: 
