@@ -141,85 +141,164 @@ def trainModel(featuresDf):
     return model, scaler, featureCol
 
 def create_matchup_data(team1, team2, seasonStats):
-    team1_stats = seasonStats[seasonStats['Team'] == team1]
-    team2_stats = seasonStats[seasonStats['Team'] == team2]
+    # Get stats for both teams
+    team1_stats = seasonStats[seasonStats['Team'] == team1].iloc[-1]
+    team2_stats = seasonStats[seasonStats['Team'] == team2].iloc[-1]
 
     if team1_stats.empty:
         raise ValueError(f"Stats for team '{team1}' not found.")
     if team2_stats.empty:
         raise ValueError(f"Stats for team '{team2}' not found.")
 
-    team1_stats = team1_stats.iloc[0]
-    team2_stats = team2_stats.iloc[0]
-
+    # Create comparative features
     matchup_features = pd.Series({
-        'goals_difference': team1_stats.get('goals_scored', 0) - team2_stats.get('goals_scored', 0),
-        'shots': team1_stats.get('shots', 0) - team2_stats.get('shots', 0),
-        'points': team1_stats.get('points', 0) - team2_stats.get('points', 0),
-        'home_advantage': 1,
+        'points': team1_stats['points'] - team2_stats['points'],  # Relative strength
+        'goals_scored': team1_stats['goals_scored'] - team2_stats['goals_scored'],
+        'goals_conceded': team1_stats['goals_conceded'] - team2_stats['goals_conceded'],
+        'shots': team1_stats['shots'] - team2_stats['shots'],
+        'shots_on_target': team1_stats['shots_on_target'] - team2_stats['shots_on_target'],
+        'corners': team1_stats['corners'] - team2_stats['corners'],
+        'fouls': team1_stats['fouls'] - team2_stats['fouls'],
+        'yellow_cards': team1_stats['yellow_cards'] - team2_stats['yellow_cards'],
+        'red_cards': team1_stats['red_cards'] - team2_stats['red_cards'],
+        'goals_difference': team1_stats['goals_difference'] - team2_stats['goals_difference'],
+        'clean_sheets': team1_stats['clean_sheets'] - team2_stats['clean_sheets'],
+        'wins': team1_stats['wins'] - team2_stats['wins'],
+        'draws': team1_stats['draws'] - team2_stats['draws'],
+        'losses': team1_stats['losses'] - team2_stats['losses'],
+        'win_ratio': team1_stats['win_ratio'] - team2_stats['win_ratio'],
+        'goals_per_game': team1_stats['goals_per_game'] - team2_stats['goals_per_game'],
+        'goals_conceded_per_game': team1_stats['goals_conceded_per_game'] - team2_stats['goals_conceded_per_game'],
+        'shots_conversion_rate': team1_stats['shots_conversion_rate'] - team2_stats['shots_conversion_rate'],
+        'shots_on_target_ratio': team1_stats['shots_on_target_ratio'] - team2_stats['shots_on_target_ratio'],
+        'avg_odds': team1_stats['avg_odds'],  # Keep home team odds
+        'market_value': team1_stats['market_value'] - team2_stats['market_value']
     })
 
     return matchup_features
 
-
 def prepare_match_dataset(seasonStats, results_df):
     match_data = []
     for _, match in results_df.iterrows():
-        team1 = match['HomeTeam']
-        team2 = match['AwayTeam']
-        result = 1 if match['FullTimeResult'] == 'H' else 0  
+        home_team = match['HomeTeam']
+        away_team = match['AwayTeam']
+        
+        # Get season for this match
+        season = seasonStats[seasonStats['Team'] == home_team]['Season'].iloc[-1]
+        
+        # Get team stats from that season
+        home_stats = seasonStats[(seasonStats['Team'] == home_team) & (seasonStats['Season'] == season)]
+        away_stats = seasonStats[(seasonStats['Team'] == away_team) & (seasonStats['Season'] == season)]
+        
+        if len(home_stats) == 0 or len(away_stats) == 0:
+            continue
 
-        features = create_matchup_data(team1, team2, seasonStats)
-        features['result'] = result
+        features = create_matchup_data(home_team, away_team, seasonStats[seasonStats['Season'] == season])
+        features['result'] = 1 if match['FullTimeResult'] == 'H' else 0
         match_data.append(features)
 
     return pd.DataFrame(match_data)
 
-def predict_match(team1, team2, model, seasonStats):
+def predict_match(team1, team2, model, scaler, feature_cols, seasonStats):
+    """
+    Predict the outcome of a match between two teams.
+    """
     features = create_matchup_data(team1, team2, seasonStats)
-    prob = model.predict_proba([features])[0]
+    features_scaled = scaler.transform([features[feature_cols]])
+    prob = model.predict_proba(features_scaled)[0]
+    
     return {
-        'team1': team1,
-        'team2': team2,
-        'team1_win_prob': prob[1],
-        'team2_win_prob': prob[0],
+        'home_team': team1,
+        'away_team': team2,
+        'home_win_probability': round(prob[1] * 100, 2),
+        'away_win_probability': round(prob[0] * 100, 2)
     }
 
+def evaluate_model_on_matches(model, scaler, feature_cols, match_df):
+    X = match_df[feature_cols]
+    y = match_df['result']
+
+    X_scaled = scaler.transform(X)
+    y_pred = model.predict(X_scaled)
+    accuracy = accuracy_score(y, y_pred)
+
+    print(f"Model Accuracy on Match Dataset: {accuracy}")
+    print("\nClassification Report:\n", classification_report(y, y_pred))
+
+    return accuracy
+
+def predict_season_winner(model, scaler, feature_cols, seasonStats, current_season):
+    """
+    Predict the likely winner of the current season based on current stats
+    """
+    current_teams = seasonStats[seasonStats['Season'] == current_season]
+    if current_teams.empty:
+        raise ValueError(f"No data found for season {current_season}")
+    
+    X = current_teams[feature_cols]
+    X_scaled = scaler.transform(X)
+    probabilities = model.predict_proba(X_scaled)
+    
+    # Create predictions dataframe
+    predictions = pd.DataFrame({
+        'Team': current_teams['Team'],
+        'Championship_Probability': [round(prob[1] * 100, 2) for prob in probabilities]
+    }).sort_values('Championship_Probability', ascending=False)
+    
+    return predictions
 
 df = pd.read_csv(f"{path}/PremierLeague.csv")
 current_year = datetime.now().year
 
 current_season = f"{current_year-1}-{current_year}"
 last_ten_seasons = [
-    f"{current_year-2}-{current_year-1}",
-    f"{current_year-3}-{current_year-2}",
-    f"{current_year-4}-{current_year-3}",
-    f"{current_year-5}-{current_year-4}",
-    f"{current_year-6}-{current_year-5}",
-    f"{current_year-7}-{current_year-6}",
-    f"{current_year-8}-{current_year-7}",
-    f"{current_year-9}-{current_year-8}",
-    f"{current_year-10}-{current_year-9}",
+    f"{current_year-i-1}-{current_year-i}" for i in range(1, 11)
 ]
 
 histData = df[df['Season'].isin(last_ten_seasons + [current_season])]
-lastten = df[df['Season'].isin(last_ten_seasons + [current_season])]
-resultsdf = lastten[[
+
+results_df = histData[[
     'HomeTeam',
     'AwayTeam',
     'FullTimeResult',
     'FullTimeHomeTeamGoals',
     'FullTimeAwayTeamGoals'
 ]]
+
 seasonStats = historicalData(histData)
-model, scaler, featureCol = trainModel(seasonStats)
-print(seasonStats['Team'].unique())
-team1 = input("Enter the name of the first team (Home Team): ")
-team2 = input("Enter the name of the second team (Away Team): ")
-matchset = prepare_match_dataset(seasonStats, resultsdf)
-print(matchset)
-match_outcome = predict_match(model, team1.strip(), team2.strip(), seasonStats)
-print(match_outcome)
+
+model, scaler, feature_cols = trainModel(seasonStats)
+
+print("\n=== Premier League Predictor ===")
+print("1. Predict match outcome")
+print("2. Predict season winner")
+choice = input("Enter your choice (1 or 2): ").strip()
+
+if choice == "1":
+    print("\nAvailable teams:", seasonStats['Team'].unique())
+    team1 = input("Enter the name of the first team (Home Team): ").strip()
+    team2 = input("Enter the name of the second team (Away Team): ").strip()
+    
+    try:
+        match_outcome = predict_match(team1, team2, model, scaler, feature_cols, seasonStats)
+        print("\nMatch Prediction:")
+        print(f"{match_outcome['home_team']} vs {match_outcome['away_team']}")
+        print(f"Home Win Probability: {match_outcome['home_win_probability']}%")
+        print(f"Away Win Probability: {match_outcome['away_win_probability']}%")
+    except ValueError as e:
+        print(f"Error: {e}")
+
+elif choice == "2":
+    try:
+        season_predictions = predict_season_winner(model, scaler, feature_cols, seasonStats, current_season)
+        print("\nSeason Winner Predictions:")
+        print("Top 5 Contenders:")
+        print(season_predictions.head().to_string(index=False))
+    except ValueError as e:
+        print(f"Error: {e}")
+
+else:
+    print("Invalid choice. Please run again and select 1 or 2.")
 
 '''
 data set keys: 
