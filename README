@@ -1,0 +1,77 @@
+# Premier League Match Prediction using Random Forest
+
+## Project Overview
+This project combines my passion for soccer (football) with machine learning by using the RandomForestClassifier to predict Premier League match outcomes. The model is trained on historical Premier League data from Kaggle to identify patterns and make predictions about match results.
+
+## Motivation
+As an avid soccer fan, I wanted to:
+- Practice implementing machine learning algorithms using scikit-learn
+- Analyze Premier League match data to uncover patterns
+- Gain hands-on experience with RandomForestClassifier
+- Combine my interest in soccer with practical coding experience
+
+## Dataset
+The dataset used in this project is the Premier League dataset from Kaggle, which includes:
+- Historical match results
+- Team statistics
+- Match-specific features (home/away goals, possession, etc.)
+- Season information
+
+## Technologies Used
+- Python
+- scikit-learn (RandomForestClassifier)
+- pandas (for data manipulation)
+- numpy (for numerical operations)
+- matplotlib/seaborn (for visualization)
+
+## Key Features
+- Data preprocessing and feature engineering
+- Implementation of RandomForestClassifier
+- Model evaluation and performance metrics
+- Visualization of results and feature importance
+
+## Results
+Accuracy: 0.9772727272727273
+
+Classification Report: 
+               precision    recall  f1-score   support
+
+       False       1.00      0.98      0.99        42
+        True       0.67      1.00      0.80         2
+
+    accuracy                           0.98        44
+   macro avg       0.83      0.99      0.89        44
+weighted avg       0.98      0.98      0.98        44
+
+
+Feature Importance: 
+                     feature  importance
+0                    points    0.140214
+14                win_ratio    0.127180
+19                 avg_odds    0.117411
+15           goals_per_game    0.079769
+11                     wins    0.075185
+16  goals_conceded_per_game    0.065555
+13                   losses    0.054279
+1              goals_scored    0.048453
+17    shots_conversion_rate    0.040653
+9          goals_difference    0.036088
+3                     shots    0.035186
+2            goals_conceded    0.032868
+4           shots_on_target    0.030203
+5                   corners    0.019918
+12                    draws    0.019097
+10             clean_sheets    0.018708
+18    shots_on_target_ratio    0.016843
+7              yellow_cards    0.016593
+6                     fouls    0.010243
+20             market_value    0.008344
+8                 red_cards    0.007211
+
+## Future Improvements
+- Include more advanced features like team form and player statistics
+- Incorporate betting odds data
+- Add match outcome prediction for upcoming matches or user input matches
+- Add season winner prediction for upcoming seasons
+- Add matchweek prediction for upcoming matchweeks
+
